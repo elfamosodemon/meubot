@@ -1,0 +1,20 @@
+{
+  "name": "bot-multifuncional",
+  "version": "1.0.0",
+  "description": "Bot para recuperação de carrinho e engajamento de comunidade.",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "body-parser": "^1.20.2",
+    "dotenv": "^16.5.0",
+    "express": "^4.19.2",
+    "node-schedule": "^2.1.1",
+    "openai": "^4.52.7",
+    "sharp": "^0.33.4",
+    "uuid": "^10.0.0",
+    "venom-bot": "^5.1.0"
+  }
+}
