@@ -1,6 +1,5 @@
-// recuperador.js ou bot.js (VERSÃO CORRIGIDA E FINAL)
-const dotenv = require('dotenv');
-dotenv.config();
+// bot.js
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const venom = require('venom-bot');
@@ -13,6 +12,7 @@ const path = require('path');
 const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
 const timersRecuperacao = {};
 
+// Garante que a pasta de sessão exista
 (async () => {
     try {
         if (!config.SESSION_FOLDER_PATH) {
@@ -23,6 +23,8 @@ const timersRecuperacao = {};
     } catch (error) {
         if (error.code === 'ENOENT') {
             await fs.mkdir(config.SESSION_FOLDER_PATH, { recursive: true });
+        } else {
+            console.error('Erro ao verificar/criar pasta de sessão:', error);
         }
     }
 })();
@@ -57,19 +59,23 @@ function setupWebhookServer(client) {
         const status = dados.status;
         const transactionId = dados.id;
 
-        if (!transactionId) return res.status(400).send({ error: 'ID da transação ausente.' });
+        if (!transactionId) {
+            return res.status(400).send({ error: 'ID da transação ausente.' });
+        }
 
         if (status === 'paid' || status === 'approved') {
             if (timersRecuperacao[transactionId]) {
                 clearTimeout(timersRecuperacao[transactionId]);
                 delete timersRecuperacao[transactionId];
-                console.log(`[Agendamento Cancelado] Recuperação para ${transactionId} foi cancelada.`);
+                console.log(`[Agendamento Cancelado] Recuperação para a transação ${transactionId} foi cancelada com sucesso.`);
             }
             return res.status(200).send({ status: 'Pagamento confirmado.' });
         }
         
         if (evento.includes('pix_gerado') || status === 'waiting_payment' || evento.includes('abandoned')) {
-            if (timersRecuperacao[transactionId]) return res.status(200).send({ status: 'Timer já ativo.' });
+            if (timersRecuperacao[transactionId]) {
+                return res.status(200).send({ status: 'Timer de recuperação já ativo.' });
+            }
 
             const nomeCliente = dados.customer?.name;
             const telefoneCliente = dados.customer?.phone;
@@ -78,20 +84,22 @@ function setupWebhookServer(client) {
                 linkCheckout = linkCheckout.split('?')[0];
             }
 
-            if (!nomeCliente || !telefoneCliente || !linkCheckout) return res.status(400).send({ error: 'Dados insuficientes.' });
-
+            if (!nomeCliente || !telefoneCliente || !linkCheckout) {
+                return res.status(400).send({ error: 'Dados insuficientes para agendamento.' });
+            }
+            
             const delayPrimeiraRecuperacao = config.DELAY_PRIMEIRA_RECUPERACAO_MINUTOS * 60 * 1000;
             console.log(`[Agendamento 1] Sequência para ${nomeCliente} agendada para daqui a ${config.DELAY_PRIMEIRA_RECUPERACAO_MINUTOS} minutos.`);
 
             const timerId_1 = setTimeout(async () => {
                 try {
+                    console.log(`\n[Envio 1] TEMPO ESGOTADO! Enviando primeira sequência para ${nomeCliente}.`);
                     const numeroWhatsApp = formatarNumero(telefoneCliente);
                     if (!numeroWhatsApp) { delete timersRecuperacao[transactionId]; return; }
                     
-                    console.log(`\n[Envio 1] Enviando primeira sequência para ${nomeCliente}.`);
-                    await client.sendText(numeroWhatsApp, config.MENSAGEM_1.replace(/{nome}/g, nomeCliente.split(' ')[0]));
+                    await client.sendText(numeroWhatsApp, config.MENSAGEM_1_RECUPERACAO.replace(/{nome}/g, nomeCliente.split(' ')[0]));
                     await delay(2000);
-                    await client.sendText(numeroWhatsApp, config.MENSAGEM_2);
+                    await client.sendText(numeroWhatsApp, config.MENSAGEM_2_RECUPERACAO);
                     await delay(2500);
                     await client.sendImage(numeroWhatsApp, config.CAMINHO_IMAGEM_1, 'comentario-1.jpg', '');
                     await delay(2000);
@@ -100,13 +108,14 @@ function setupWebhookServer(client) {
                     await client.sendText(numeroWhatsApp, `Se quiser finalizar sua compra com segurança, o link é este aqui:\n\n👉 ${linkCheckout}`);
                     console.log(`✅ Primeira sequência enviada para ${nomeCliente}!`);
                     
-                    const delaySegundaRecuperacao = config.DELAY_SEGUNDA_RECUPERACAO_HORAS * 60 * 60 * 1000;
-                    console.log(`[Agendamento 2] Downsell para ${nomeCliente} agendado para daqui a ${config.DELAY_SEGUNDA_RECUPERACAO_HORAS} horas.`);
+                    const delaySegundaRecuperacao = config.DELAY_DOWNSELL_MINUTOS_APOS_RECUPERACAO * 60 * 1000;
+                    console.log(`[Agendamento 2] Downsell para ${nomeCliente} agendado para daqui a ${config.DELAY_DOWNSELL_MINUTOS_APOS_RECUPERACAO} minutos.`);
                     
                     const timerId_2 = setTimeout(async () => {
                         try {
                             const mensagemDownsell = config.MENSAGEM_DOWNSELL.replace(/{nome}/g, nomeCliente.split(' ')[0]).replace(/{link_downsell}/g, config.LINK_DOWNSELL);
                             await client.sendText(numeroWhatsApp, mensagemDownsell);
+                            console.log(`✅ Mensagem de downsell enviada para ${nomeCliente}!`);
                         } catch (error) { console.error(`❌ Erro ao enviar downsell:`, error);
                         } finally { delete timersRecuperacao[transactionId]; }
                     }, delaySegundaRecuperacao);
@@ -135,11 +144,12 @@ function setupDailyScheduler(client) {
     schedule.scheduleJob('0 7 * * *', async () => {
         console.log(`\n[Agendador] EXECUTANDO! Enviando mensagem motivacional... [${new Date().toLocaleTimeString('pt-BR')}]`);
         try {
-            if (!config.MOTIVATIONAL_GROUP_ID) {
-                console.warn('[Agendador] ID do grupo não configurado. Pulando envio.');
+            if (!config.MOTIVATIONAL_GROUP_ID || !config.MOTIVATIONAL_GROUP_ID.includes('@g.us')) {
+                console.warn('[Agendador] ID do grupo não configurado corretamente. Pulando envio.');
                 return;
             }
-            const prompt = "Crie uma frase motivacional curta e poderosa sobre emagrecimento e superação. O tom deve ser positivo e encorajador, como uma amiga dando força para começar o dia.";
+            const prompt = "Crie uma frase motivacional curta, poderosa e inspiradora sobre emagrecimento e superação. O tom deve ser positivo, como uma amiga dando força para começar o dia.";
+            
             const completion = await openai.chat.completions.create({
                 model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }], temperature: 0.9,
             });
@@ -152,33 +162,19 @@ function setupDailyScheduler(client) {
     });
 }
 
-// --- FUNÇÃO DE INICIALIZAÇÃO PRINCIPAL ---
-function start(client) {
+async function start(client) {
     // Inicia os diferentes módulos do bot
     setupWebhookServer(client);
     setupDailyScheduler(client);
+    
+    // Este bot não responderá a mensagens diretas, apenas aos webhooks e ao agendador.
+    // O client.onMessage foi removido para focar nas tarefas automatizadas.
 
-    // --- OUVINTE DE MENSAGENS ---
-    // Adicionado aqui para que o bot possa responder ou pegar IDs
-    client.onMessage((message) => {
-        // Log para descobrir IDs de qualquer chat (privado ou grupo)
-        console.log(`--- [DETECTOR DE ID] --- ID do Chat: ${message.from} | Nome: ${message.chat?.name || 'Privado'}`);
-
-        // No futuro, você pode adicionar lógicas aqui, como a da Maria Luzia
-        // if (message.isGroupMsg) {
-        //   handleGroupMessage(client, message);
-        // } else {
-        //   handlePrivateMessage(client, message);
-        // }
-    });
-
-    console.log('✅ Bot Multifuncional está pronto e operando!');
+    console.log('✅ Bot Multifuncional (Recuperador + Agendador) está pronto e operando!');
 }
 
-// --- PONTO DE ENTRADA DO PROGRAMA ---
 console.log('Iniciando Bot Multifuncional...');
-venom
-  .create({
+venom.create({
     session: config.SESSION_NAME,
     headless: 'new',
     executablePath: config.CHROME_EXECUTABLE_PATH,
@@ -195,8 +191,8 @@ venom
             console.log('✅ Login automático realizado com sucesso!');
         }
     }
-  })
-  .then(start)
-  .catch((error) => {
+})
+.then(start)
+.catch((error) => {
     console.error('Erro CRÍTICO ao criar cliente Venom:', error);
-  });
+});
