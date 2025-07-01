@@ -1,0 +1,11 @@
+# Ignorar dependências do Node.js
+node_modules
+
+# Ignorar pasta de tokens e sessões
+tokens/
+
+# Arquivos de log
+*.log
+
+# Arquivos de ambiente (se você usar)
+.env
