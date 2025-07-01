@@ -1,5 +1,5 @@
 // ==================================================================================
-//          CÓDIGO COMPLETO E FINAL (v9) - CORREÇÃO DO ID "NULL" DA KIRVANO
+//          CÓDIGO COMPLETO E FINAL (v10) - COM TERCEIRO DOWNSELL
 // ==================================================================================
 
 const express = require('express');
@@ -135,10 +135,9 @@ function setupWebhookServer(client) {
         console.log('\n[ROTA /webhook/abandono] O corpo da requisição é:');
         console.log(JSON.stringify(req.body, null, 2));
 
-        // ADAPTADOR INTELIGENTE (v3)
+        // ADAPTADOR INTELIGENTE
         let dadosNormalizados = {};
         if (req.body.data) {
-            // Formato Cakto
             console.log("[Adaptador] Formato 'Cakto' detectado.");
             const caktoData = req.body.data;
             dadosNormalizados = {
@@ -150,9 +149,7 @@ function setupWebhookServer(client) {
                 linkCheckout: caktoData.checkoutUrl,
             };
         } else if (req.body.customer?.phone_number) {
-            // Formato Kirvano
             console.log("[Adaptador] Formato 'Kirvano' detectado.");
-            
             let kirvanoId = req.body.checkout_id || req.body.sale_id;
             if (!kirvanoId || kirvanoId === 'null') {
                 if (req.body.checkout_url && req.body.checkout_url.includes('/')) {
@@ -164,7 +161,6 @@ function setupWebhookServer(client) {
                     }
                 }
             }
-
             dadosNormalizados = {
                 id: kirvanoId,
                 status: req.body.status,
@@ -174,7 +170,6 @@ function setupWebhookServer(client) {
                 linkCheckout: req.body.checkout_url,
             };
         } else {
-            // Formato Direto/Genérico
             console.log("[Adaptador] Formato 'Direto/Genérico' detectado.");
             dadosNormalizados = {
                 id: req.body.checkout_id || req.body.id || req.body.transaction_id,
@@ -241,7 +236,7 @@ function setupWebhookServer(client) {
             }
 
             const delayPrimeiraRecuperacao = config.DELAY_PRIMEIRA_RECUPERACAO_MINUTOS * 60 * 1000;
-            console.log(`[Agendamento] Recuperação para ${id} de ${nomeFinal} agendada para daqui a ${config.DELAY_PRIMEIRA_RECUPERACAO_MINUTOS} minutos.`);
+            console.log(`[Agendamento 1] Recuperação inicial para ${id} de ${nomeFinal} agendada para daqui a ${config.DELAY_PRIMEIRA_RECUPERACAO_MINUTOS} minutos.`);
 
             const timerId_1 = setTimeout(async () => {
                 try {
@@ -258,16 +253,35 @@ function setupWebhookServer(client) {
                     console.log(`✅ 1ª sequência enviada para ${nomeFinal}!`);
                     
                     const delaySegundaRecuperacao = config.DELAY_DOWNSELL_MINUTOS_APOS_RECUPERACAO * 60 * 1000;
-                    console.log(`[Agendamento] Downsell para ${nomeFinal} agendado para daqui a ${config.DELAY_DOWNSELL_MINUTOS_APOS_RECUPERACAO} minutos.`);
+                    console.log(`[Agendamento 2] Downsell de desconto para ${nomeFinal} agendado para daqui a ${config.DELAY_DOWNSELL_MINUTOS_APOS_RECUPERACAO} minutos.`);
                     
                     const timerId_2 = setTimeout(async () => {
                         try {
-                            const mensagemDownsell = config.MENSAGEM_DOWNSELL_ESTAGIO_2.replace(/{nome}/g, nomeFinal.split(' ')[0]).replace(/{link_downsell}/g, config.LINK_DOWNSELL);
-                            await client.sendText(numeroWhatsApp, mensagemDownsell);
-                            console.log(`✅ Mensagem de downsell enviada para ${nomeFinal}!`);
+                            const mensagemDownsell2 = config.MENSAGEM_DOWNSELL_ESTAGIO_2.replace(/{nome}/g, nomeFinal.split(' ')[0]).replace(/{link_downsell}/g, config.LINK_DOWNSELL);
+                            await client.sendText(numeroWhatsApp, mensagemDownsell2);
+                            console.log(`✅ Mensagem de downsell (estágio 2) enviada para ${nomeFinal}!`);
+
+                            const delayTerceiraRecuperacao = config.DELAY_ULTIMO_DOWNSELL_MINUTOS * 60 * 1000;
+                            console.log(`[Agendamento 3] Downsell final (oferta de confiança) para ${nomeFinal} agendado para daqui a ${config.DELAY_ULTIMO_DOWNSELL_MINUTOS} minutos.`);
+
+                            const timerId_3 = setTimeout(async () => {
+                                try {
+                                    const mensagemDownsell3 = config.MENSAGEM_DOWNSELL_ESTAGIO_3
+                                        .replace(/{nome}/g, nomeFinal.split(' ')[0])
+                                        .replace(/{link_grupo_gratis}/g, config.LINK_GRUPO_GRATIS)
+                                        .replace(/{link_downsell}/g, config.LINK_DOWNSELL);
+                                    await client.sendText(numeroWhatsApp, mensagemDownsell3);
+                                    console.log(`✅ Mensagem de downsell (estágio 3) enviada para ${nomeFinal}!`);
+                                } catch (error) {
+                                    console.error(`❌ Erro ao enviar downsell (estágio 3) para ${id}:`, error);
+                                } finally {
+                                    delete timersRecuperacao[id];
+                                }
+                            }, delayTerceiraRecuperacao);
+                            timersRecuperacao[id] = timerId_3;
+
                         } catch (error) { 
-                            console.error(`❌ Erro ao enviar downsell para ${id}:`, error);
-                        } finally { 
+                            console.error(`❌ Erro ao enviar downsell (estágio 2) para ${id}:`, error);
                             delete timersRecuperacao[id]; 
                         }
                     }, delaySegundaRecuperacao);
